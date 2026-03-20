@@ -152,6 +152,75 @@
   line-height: 1.4;
 }
 
+.ant-tag {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.is-clickable-row {
+  cursor: pointer;
+}
+
+.is-clickable-row:hover td {
+  background: rgba(20, 83, 45, 0.05) !important;
+}
+
+.drilldown-modal {
+  display: grid;
+  gap: 16px;
+  max-width: 100%;
+}
+
+.drilldown-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.table-search-dropdown {
+  display: grid;
+  gap: 8px;
+  min-width: 220px;
+}
+
+.drilldown-dialog .ant-modal-content {
+  overflow: hidden;
+}
+
+.drilldown-dialog .ant-modal-body {
+  overflow: hidden;
+  padding-right: 0;
+}
+
+.drilldown-table-shell {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+}
+
+.drilldown-table {
+  max-width: 100%;
+  min-width: 1320px;
+}
+
+.drilldown-table .ant-table-wrapper,
+.drilldown-table .ant-table-container,
+.drilldown-table .ant-table-content {
+  max-width: 100%;
+}
+
+.drilldown-table .ant-table-content {
+  overflow-x: visible !important;
+}
+
+.drilldown-table .ant-table-cell {
+  vertical-align: top;
+  word-break: break-word;
+}
+
 @media (max-width: 1200px) {
   .upload-screen,
   .stats-grid,
@@ -167,6 +236,11 @@
   .header-actions {
     justify-items: stretch;
     width: 100%;
+  }
+
+  .drilldown-summary {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

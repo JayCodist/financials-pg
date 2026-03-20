@@ -1,4 +1,4 @@
-import { startTransition, useDeferredValue, useState } from 'react'
+import { startTransition, useDeferredValue, useState, type Key, type ReactNode } from 'react'
 import {
   Alert,
   Button,
@@ -6,6 +6,8 @@ import {
   ConfigProvider,
   DatePicker,
   Empty,
+  Input,
+  Modal,
   Progress,
   Segmented,
   Space,
@@ -14,6 +16,8 @@ import {
   Tag,
   Typography,
 } from 'antd'
+import { SearchOutlined } from '@ant-design/icons'
+import type { FilterDropdownProps } from 'antd/es/table/interface'
 import dayjs, { type Dayjs } from 'dayjs'
 import './App.css'
 import {
@@ -21,15 +25,17 @@ import {
   buildChannelRows,
   buildDailyRows,
   buildDescriptionRows,
-  buildRecipientAccountRows,
+  buildInboundAccountRows,
   buildRecipientRows,
   buildRecurringRows,
   filterTransactions,
   formatCurrency,
   formatDay,
   formatTimestamp,
+  getRecipientGroupKey,
   parseStatementWorkbook,
   summarizeTransactions,
+  type DailyFlowRow,
   type FlowFilter,
   type GroupedMetricRow,
   type StatementDataset,
@@ -41,6 +47,28 @@ const { Paragraph, Text, Title } = Typography
 
 type RangeValue = [Dayjs | null, Dayjs | null] | null
 
+type DrilldownState = {
+  title: string
+  subtitle: string
+  rows: StatementTransaction[]
+}
+
+type DrilldownGroupMode =
+  | 'recipient'
+  | 'account'
+  | 'inboundAccount'
+  | 'description'
+  | 'recurring'
+  | 'channel'
+  | 'accountType'
+
+type ColumnSearchConfig<T> = {
+  filterDropdown: (props: FilterDropdownProps) => ReactNode
+  filterIcon: (filtered: boolean) => ReactNode
+  onFilter: (value: boolean | Key, record: T) => boolean
+  filterSearch: boolean
+}
+
 function App() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [dataset, setDataset] = useState<StatementDataset | null>(null)
@@ -48,6 +76,7 @@ function App() {
   const [flowFilter, setFlowFilter] = useState<FlowFilter>('all')
   const [isParsing, setIsParsing] = useState(false)
   const [parseError, setParseError] = useState<string | null>(null)
+  const [drilldown, setDrilldown] = useState<DrilldownState | null>(null)
 
   const deferredRange = useDeferredValue(dateRange)
 
@@ -56,7 +85,7 @@ function App() {
     : []
   const summary = summarizeTransactions(filteredTransactions)
   const recipientRows = buildRecipientRows(filteredTransactions).slice(0, 12)
-  const recipientAccountRows = buildRecipientAccountRows(filteredTransactions).slice(0, 12)
+  const inboundAccountRows = buildInboundAccountRows(filteredTransactions).slice(0, 12)
   const descriptionRows = buildDescriptionRows(filteredTransactions).slice(0, 12)
   const recurringRows = buildRecurringRows(filteredTransactions).slice(0, 10)
   const channelRows = buildChannelRows(filteredTransactions)
@@ -120,6 +149,41 @@ function App() {
     setFlowFilter('all')
     setSelectedFile(null)
     setParseError(null)
+    setDrilldown(null)
+  }
+
+  const openGroupDrilldown = (mode: DrilldownGroupMode, row: GroupedMetricRow) => {
+    const rows = filteredTransactions
+      .filter((transaction) => matchesGroupedTransaction(transaction, row, mode))
+      .sort(sortTransactionsByLatest)
+
+    setDrilldown({
+      title: row.label,
+      subtitle: row.secondary ?? `${rows.length} matching transaction${rows.length === 1 ? '' : 's'}`,
+      rows,
+    })
+  }
+
+  const openDailyDrilldown = (row: DailyFlowRow) => {
+    const rows = filteredTransactions
+      .filter((transaction) => transaction.valueDate === row.day)
+      .sort(sortTransactionsByLatest)
+
+    setDrilldown({
+      title: `Transactions on ${formatDay(row.day)}`,
+      subtitle: `${row.transactions} occurrence${row.transactions === 1 ? '' : 's'} in the selected range`,
+      rows,
+    })
+  }
+
+  const openTransactionDrilldown = (row: StatementTransaction) => {
+    const rows = filteredTransactions.filter((transaction) => transaction.id === row.id)
+
+    setDrilldown({
+      title: row.descriptionCluster,
+      subtitle: row.reference ?? row.description,
+      rows,
+    })
   }
 
   return (
@@ -270,12 +334,14 @@ function App() {
                     subtitle="Who receives the most from the selected period"
                     rows={recipientRows}
                     columns={groupColumns('recipient')}
+                    onRowClick={(row) => openGroupDrilldown('recipient', row)}
                   />
                   <DashboardTable
-                    title="Recipient account numbers"
-                    subtitle="Useful when the same person uses multiple destination accounts"
-                    rows={recipientAccountRows}
-                    columns={groupColumns('account')}
+                    title="Inbound account numbers"
+                    subtitle="The reverse view: which source accounts send you the most in the selected period"
+                    rows={inboundAccountRows}
+                    columns={groupColumns('account', 'inbound')}
+                    onRowClick={(row) => openGroupDrilldown('inboundAccount', row)}
                   />
                 </section>
 
@@ -285,12 +351,14 @@ function App() {
                     subtitle="Normalized descriptions show where repeated money movement builds up"
                     rows={descriptionRows}
                     columns={groupColumns('description')}
+                    onRowClick={(row) => openGroupDrilldown('description', row)}
                   />
                   <DashboardTable
                     title="Channels ranked by flow"
                     subtitle="Which rails move the most money in or out"
                     rows={channelRows}
                     columns={channelColumns}
+                    onRowClick={(row) => openGroupDrilldown('channel', row)}
                   />
                 </section>
 
@@ -300,12 +368,14 @@ function App() {
                     subtitle="Repeated spend groups help surface habits and subscriptions"
                     rows={recurringRows}
                     columns={groupColumns('recurring')}
+                    onRowClick={(row) => openGroupDrilldown('recurring', row)}
                   />
                   <DashboardTable
                     title="Account split"
                     subtitle="Wallet versus savings exposure inside the chosen period"
                     rows={accountTypeRows}
                     columns={channelColumns}
+                    onRowClick={(row) => openGroupDrilldown('accountType', row)}
                   />
                 </section>
 
@@ -315,12 +385,14 @@ function App() {
                     subtitle="Track the days with the biggest inflow or burn"
                     rows={dailyRows}
                     columns={dailyColumns}
+                    onRowClick={openDailyDrilldown}
                   />
                   <DashboardTable
                     title="Fees and subscriptions"
                     subtitle="A quick view of quiet cash leaks"
                     rows={feeTransactions}
                     columns={feeColumns}
+                    onRowClick={openTransactionDrilldown}
                   />
                 </section>
 
@@ -330,12 +402,50 @@ function App() {
                     subtitle="The latest parsed rows in the active range"
                     rows={recentTransactions}
                     columns={transactionColumns}
+                    onRowClick={openTransactionDrilldown}
                   />
                 </section>
               </>
             )}
           </section>
         )}
+
+        <Modal
+          open={Boolean(drilldown)}
+          title={drilldown?.title}
+          onCancel={() => setDrilldown(null)}
+          footer={null}
+          width="96vw"
+          style={{ maxWidth: 1400, top: 24, paddingBottom: 24 }}
+          className="drilldown-dialog"
+          destroyOnHidden
+        >
+          {drilldown ? (
+            <div className="drilldown-modal">
+              <div className="drilldown-summary">
+                <Text type="secondary">{drilldown.subtitle}</Text>
+                <Space wrap>
+                  <Tag color="blue">{drilldown.rows.length} rows</Tag>
+                  <Tag color="volcano">
+                    Outbound {formatCurrency(sumAmounts(drilldown.rows, 'outbound'))}
+                  </Tag>
+                  <Tag color="green">
+                    Inbound {formatCurrency(sumAmounts(drilldown.rows, 'inbound'))}
+                  </Tag>
+                </Space>
+              </div>
+
+              <Table
+                rowKey="id"
+                dataSource={drilldown.rows}
+                columns={drilldownColumns}
+                pagination={{ pageSize: 10, showSizeChanger: false }}
+                scroll={{ x: 1600 }}
+                className="drilldown-table"
+              />
+            </div>
+          ) : null}
+        </Modal>
       </div>
     </ConfigProvider>
   )
@@ -366,11 +476,13 @@ function DashboardTable<T extends object>({
   subtitle,
   rows,
   columns,
+  onRowClick,
 }: {
   title: string
   subtitle: string
   rows: T[]
   columns: Array<Record<string, unknown>>
+  onRowClick?: (row: T) => void
 }) {
   return (
     <Card bordered={false} className="panel-card" title={title} extra={<Text type="secondary">{subtitle}</Text>}>
@@ -381,9 +493,88 @@ function DashboardTable<T extends object>({
         pagination={false}
         scroll={{ x: 920 }}
         locale={{ emptyText: 'No rows to show for this range.' }}
+        rowClassName={() => (onRowClick ? 'is-clickable-row' : '')}
+        onRow={onRowClick ? (row) => ({ onClick: () => onRowClick(row) }) : undefined}
       />
     </Card>
   )
+}
+
+function matchesGroupedTransaction(
+  transaction: StatementTransaction,
+  row: GroupedMetricRow,
+  mode: DrilldownGroupMode,
+) {
+  switch (mode) {
+    case 'recipient':
+      return transaction.direction === 'outbound' && getRecipientGroupKey(transaction) === row.key
+    case 'account':
+      return transaction.direction === 'outbound' && transaction.recipientAccountNumber === row.key
+    case 'inboundAccount':
+      return transaction.direction === 'inbound' && transaction.recipientAccountNumber === row.key
+    case 'description':
+    case 'recurring':
+      return transaction.direction === 'outbound' && transaction.descriptionFingerprint === row.key
+    case 'channel':
+      return (transaction.channel?.toLowerCase() ?? 'unassigned') === row.key
+    case 'accountType':
+      return transaction.accountType.toLowerCase() === row.key
+  }
+}
+
+function sortTransactionsByLatest(left: StatementTransaction, right: StatementTransaction) {
+  return dayjs(right.transactedAt).valueOf() - dayjs(left.transactedAt).valueOf()
+}
+
+function sumAmounts(rows: StatementTransaction[], direction: StatementTransaction['direction']) {
+  return rows
+    .filter((row) => row.direction === direction)
+    .reduce((total, row) => total + row.amount, 0)
+}
+
+function withColumnSearch<T extends object>(
+  getSearchText: (row: T) => string,
+  placeholder: string,
+): ColumnSearchConfig<T> {
+  return {
+    filterDropdown: ({ selectedKeys, setSelectedKeys, confirm, clearFilters }) => (
+      <div className="table-search-dropdown" onKeyDown={(event) => event.stopPropagation()}>
+        <Input
+          allowClear
+          autoFocus
+          placeholder={placeholder}
+          value={String(selectedKeys[0] ?? '')}
+          onChange={(event) => {
+            const value = event.target.value
+            setSelectedKeys(value ? [value] : [])
+          }}
+          onPressEnter={() => confirm()}
+        />
+        <Space>
+          <Button type="primary" size="small" onClick={() => confirm()}>
+            Search
+          </Button>
+          <Button
+            size="small"
+            onClick={() => {
+              clearFilters?.()
+              confirm({ closeDropdown: false })
+            }}
+          >
+            Reset
+          </Button>
+        </Space>
+      </div>
+    ),
+    filterIcon: (filtered: boolean) => (
+      <SearchOutlined style={{ color: filtered ? '#14532d' : '#8ca295' }} />
+    ),
+    onFilter: (value, record) =>
+      getSearchText(record)
+        .toLowerCase()
+        .includes(String(value).trim().toLowerCase()),
+    filterSearch: false,
+  }
 }
 
 function buildRangePresets(range: [Dayjs, Dayjs] | null) {
@@ -406,13 +597,20 @@ function renderFlowTag(amount: number, positive: boolean) {
   return <Tag color={positive ? 'green' : 'volcano'}>{formatCurrency(amount)}</Tag>
 }
 
-function groupColumns(mode: 'recipient' | 'account' | 'description' | 'recurring') {
+function groupColumns(
+  mode: 'recipient' | 'account' | 'description' | 'recurring',
+  direction: 'outbound' | 'inbound' = 'outbound',
+) {
   const firstColumnTitle = {
     recipient: 'Recipient',
-    account: 'Account number',
+    account: direction === 'inbound' ? 'Source account' : 'Account number',
     description: 'Description cluster',
     recurring: 'Recurring cluster',
   }[mode]
+
+  const totalKey = direction === 'inbound' ? 'inboundTotal' : 'outboundTotal'
+  const totalTitle = direction === 'inbound' ? 'Inbound' : 'Outbound'
+  const averageTitle = direction === 'inbound' ? 'Average inflow' : 'Average outflow'
 
   return [
     {
@@ -426,13 +624,20 @@ function groupColumns(mode: 'recipient' | 'account' | 'description' | 'recurring
           <div className="cell-secondary">{row.secondary ?? row.sampleDescription}</div>
         </div>
       ),
+      ...withColumnSearch<GroupedMetricRow>(
+        (row) => [row.label, row.secondary, row.sampleDescription].filter(Boolean).join(' '),
+        `Search ${firstColumnTitle.toLowerCase()}`,
+      ),
     },
     {
-      title: 'Outbound',
-      dataIndex: 'outboundTotal',
-      key: 'outboundTotal',
-      sorter: (left: GroupedMetricRow, right: GroupedMetricRow) => left.outboundTotal - right.outboundTotal,
-      render: (value: number) => renderFlowTag(value, false),
+      title: totalTitle,
+      dataIndex: totalKey,
+      key: totalKey,
+      sorter: (left: GroupedMetricRow, right: GroupedMetricRow) =>
+        direction === 'inbound'
+          ? left.inboundTotal - right.inboundTotal
+          : left.outboundTotal - right.outboundTotal,
+      render: (value: number) => renderFlowTag(value, direction === 'inbound'),
     },
     {
       title: 'Occurrences',
@@ -441,10 +646,17 @@ function groupColumns(mode: 'recipient' | 'account' | 'description' | 'recurring
       sorter: (left: GroupedMetricRow, right: GroupedMetricRow) => left.occurrences - right.occurrences,
     },
     {
-      title: 'Average outflow',
+      title: averageTitle,
       dataIndex: 'averageOutbound',
-      key: 'averageOutbound',
-      render: (value: number) => formatCurrency(value),
+      key: direction === 'inbound' ? 'averageInbound' : 'averageOutbound',
+      render: (_value: number, row: GroupedMetricRow) =>
+        formatCurrency(
+          direction === 'inbound'
+            ? row.occurrences > 0
+              ? row.inboundTotal / row.occurrences
+              : 0
+            : row.averageOutbound,
+        ),
     },
     {
       title: 'Last seen',
@@ -466,6 +678,10 @@ const channelColumns = [
         <strong>{row.label}</strong>
         <div className="cell-secondary">{row.secondary ?? row.sampleDescription}</div>
       </div>
+    ),
+    ...withColumnSearch<GroupedMetricRow>(
+      (row) => [row.label, row.secondary, row.sampleDescription].filter(Boolean).join(' '),
+      'Search bucket',
     ),
   },
   {
@@ -499,6 +715,7 @@ const dailyColumns = [
     dataIndex: 'day',
     key: 'day',
     render: (value: string) => formatDay(value),
+    ...withColumnSearch<DailyFlowRow>((row) => formatDay(row.day), 'Search day'),
   },
   {
     title: 'Spent',
@@ -531,6 +748,10 @@ const feeColumns = [
     dataIndex: 'transactedAt',
     key: 'transactedAt',
     render: (value: string) => formatTimestamp(value),
+    ...withColumnSearch<StatementTransaction>(
+      (row) => `${formatTimestamp(row.transactedAt)} ${formatDay(row.valueDate)}`,
+      'Search timestamp',
+    ),
   },
   {
     title: 'Description',
@@ -558,6 +779,10 @@ const transactionColumns = [
     key: 'transactedAt',
     width: 190,
     render: (value: string) => formatTimestamp(value),
+    ...withColumnSearch<StatementTransaction>(
+      (row) => `${formatTimestamp(row.transactedAt)} ${formatDay(row.valueDate)}`,
+      'Search timestamp',
+    ),
   },
   {
     title: 'Description',
@@ -613,6 +838,121 @@ const transactionColumns = [
     title: 'Channel',
     dataIndex: 'channel',
     key: 'channel',
+    render: (value: string | null) => value ?? '—',
+  },
+]
+
+const drilldownColumns = [
+  {
+    title: 'When',
+    dataIndex: 'transactedAt',
+    key: 'transactedAt',
+    width: 180,
+    render: (value: string) => formatTimestamp(value),
+    ...withColumnSearch<StatementTransaction>(
+      (row) => `${formatTimestamp(row.transactedAt)} ${formatDay(row.valueDate)}`,
+      'Search timestamp',
+    ),
+  },
+  {
+    title: 'Value date',
+    dataIndex: 'valueDate',
+    key: 'valueDate',
+    width: 130,
+    render: (value: string) => formatDay(value),
+  },
+  {
+    title: 'Account',
+    dataIndex: 'accountType',
+    key: 'accountType',
+    width: 110,
+  },
+  {
+    title: 'Category',
+    dataIndex: 'category',
+    key: 'category',
+    width: 130,
+  },
+  {
+    title: 'Direction',
+    dataIndex: 'direction',
+    key: 'direction',
+    width: 120,
+    render: (value: StatementTransaction['direction']) => (
+      <Tag color={value === 'outbound' ? 'volcano' : 'green'}>{value}</Tag>
+    ),
+  },
+  {
+    title: 'Description',
+    dataIndex: 'description',
+    key: 'description',
+    width: 380,
+    render: (_value: string, row: StatementTransaction) => (
+      <div>
+        <strong>{row.descriptionCluster}</strong>
+        <div className="cell-secondary">{row.description}</div>
+      </div>
+    ),
+  },
+  {
+    title: 'Recipient',
+    dataIndex: 'recipientName',
+    key: 'recipientName',
+    width: 220,
+    render: (_value: string | null, row: StatementTransaction) => (
+      <div>
+        <strong>{row.recipientName ?? '—'}</strong>
+        <div className="cell-secondary">{row.note ?? row.counterpartyBank ?? '—'}</div>
+      </div>
+    ),
+  },
+  {
+    title: 'Destination account',
+    dataIndex: 'recipientAccountNumber',
+    key: 'recipientAccountNumber',
+    width: 170,
+    render: (value: string | null) => value ?? '—',
+  },
+  {
+    title: 'Bank',
+    dataIndex: 'counterpartyBank',
+    key: 'counterpartyBank',
+    width: 180,
+    render: (value: string | null) => value ?? '—',
+  },
+  {
+    title: 'Debit',
+    dataIndex: 'debit',
+    key: 'debit',
+    width: 140,
+    render: (value: number) => (value > 0 ? formatCurrency(value) : '—'),
+  },
+  {
+    title: 'Credit',
+    dataIndex: 'credit',
+    key: 'credit',
+    width: 140,
+    render: (value: number) => (value > 0 ? formatCurrency(value) : '—'),
+  },
+  {
+    title: 'Balance after',
+    dataIndex: 'balanceAfter',
+    key: 'balanceAfter',
+    width: 160,
+    render: (value: number | null) => (value !== null ? formatCurrency(value) : '—'),
+  },
+  {
+    title: 'Channel',
+    dataIndex: 'channel',
+    key: 'channel',
+    width: 120,
+    render: (value: string | null) => value ?? '—',
+  },
+  {
+    title: 'Reference',
+    dataIndex: 'reference',
+    key: 'reference',
+    width: 240,
     render: (value: string | null) => value ?? '—',
   },
 ]

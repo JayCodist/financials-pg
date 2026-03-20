@@ -216,20 +216,32 @@ export function summarizeTransactions(transactions: StatementTransaction[]): Sum
 export function buildRecipientRows(transactions: StatementTransaction[]): GroupedMetricRow[] {
   return buildGroups(
     transactions.filter((transaction) => transaction.direction === 'outbound'),
-    (transaction) =>
-      transaction.recipientName?.toLowerCase() ??
-      transaction.recipientAccountNumber ??
-      transaction.descriptionCluster.toLowerCase(),
+    (transaction) => buildRecipientGroupKey(transaction),
     (transaction) => transaction.recipientName ?? transaction.descriptionCluster,
     (transaction) =>
       joinSecondaryParts([transaction.counterpartyBank, transaction.recipientAccountNumber]),
   )
 }
 
+export function getRecipientGroupKey(transaction: StatementTransaction): string {
+  return buildRecipientGroupKey(transaction)
+}
+
 export function buildRecipientAccountRows(transactions: StatementTransaction[]): GroupedMetricRow[] {
   return buildGroups(
     transactions.filter(
       (transaction) => transaction.direction === 'outbound' && transaction.recipientAccountNumber,
+    ),
+    (transaction) => transaction.recipientAccountNumber ?? transaction.descriptionFingerprint,
+    (transaction) => transaction.recipientAccountNumber ?? 'Unknown account',
+    (transaction) => joinSecondaryParts([transaction.recipientName, transaction.counterpartyBank]),
+  )
+}
+
+export function buildInboundAccountRows(transactions: StatementTransaction[]): GroupedMetricRow[] {
+  return buildGroups(
+    transactions.filter(
+      (transaction) => transaction.direction === 'inbound' && transaction.recipientAccountNumber,
     ),
     (transaction) => transaction.recipientAccountNumber ?? transaction.descriptionFingerprint,
     (transaction) => transaction.recipientAccountNumber ?? 'Unknown account',
@@ -672,4 +684,16 @@ function buildGroups(
 function joinSecondaryParts(parts: Array<string | null>): string | null {
   const value = parts.filter(Boolean).join(' · ')
   return value || null
+}
+
+function buildRecipientGroupKey(transaction: StatementTransaction): string {
+  const base =
+    transaction.recipientName?.toLowerCase() ??
+    transaction.recipientAccountNumber ??
+    transaction.descriptionCluster.toLowerCase()
+
+  const bank = transaction.counterpartyBank?.toLowerCase() ?? 'no-bank'
+  const account = transaction.recipientAccountNumber ?? 'no-account'
+
+  return `${base}::${bank}::${account}`
 }
