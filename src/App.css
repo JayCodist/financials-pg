@@ -221,6 +221,13 @@
   word-break: break-word;
 }
 
+.drilldown-table .amount-cell {
+  display: inline-block;
+  min-width: 7.5rem;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
 @media (max-width: 1200px) {
   .upload-screen,
   .stats-grid,

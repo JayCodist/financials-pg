@@ -84,8 +84,8 @@ function App() {
     ? filterTransactions(dataset.transactions, deferredRange, flowFilter)
     : []
   const summary = summarizeTransactions(filteredTransactions)
-  const recipientRows = buildRecipientRows(filteredTransactions).slice(0, 12)
-  const inboundAccountRows = buildInboundAccountRows(filteredTransactions).slice(0, 12)
+  const recipientRows = buildRecipientRows(filteredTransactions)
+  const inboundAccountRows = buildInboundAccountRows(filteredTransactions)
   const descriptionRows = buildDescriptionRows(filteredTransactions).slice(0, 12)
   const recurringRows = buildRecurringRows(filteredTransactions).slice(0, 10)
   const channelRows = buildChannelRows(filteredTransactions)
@@ -334,6 +334,7 @@ function App() {
                     subtitle="Who receives the most from the selected period"
                     rows={recipientRows}
                     columns={groupColumns('recipient')}
+                    pagination={{ pageSize: 10, showSizeChanger: false }}
                     onRowClick={(row) => openGroupDrilldown('recipient', row)}
                   />
                   <DashboardTable
@@ -341,6 +342,7 @@ function App() {
                     subtitle="The reverse view: which source accounts send you the most in the selected period"
                     rows={inboundAccountRows}
                     columns={groupColumns('account', 'inbound')}
+                    pagination={{ pageSize: 10, showSizeChanger: false }}
                     onRowClick={(row) => openGroupDrilldown('inboundAccount', row)}
                   />
                 </section>
@@ -476,12 +478,14 @@ function DashboardTable<T extends object>({
   subtitle,
   rows,
   columns,
+  pagination,
   onRowClick,
 }: {
   title: string
   subtitle: string
   rows: T[]
   columns: Array<Record<string, unknown>>
+  pagination?: false | { pageSize: number; showSizeChanger: boolean }
   onRowClick?: (row: T) => void
 }) {
   return (
@@ -490,7 +494,7 @@ function DashboardTable<T extends object>({
         rowKey={(row) => String((row as { key?: string; id?: string }).key ?? (row as { id?: string }).id)}
         dataSource={rows}
         columns={columns}
-        pagination={false}
+        pagination={pagination ?? false}
         scroll={{ x: 920 }}
         locale={{ emptyText: 'No rows to show for this range.' }}
         rowClassName={() => (onRowClick ? 'is-clickable-row' : '')}
@@ -595,6 +599,10 @@ function buildRangePresets(range: [Dayjs, Dayjs] | null) {
 
 function renderFlowTag(amount: number, positive: boolean) {
   return <Tag color={positive ? 'green' : 'volcano'}>{formatCurrency(amount)}</Tag>
+}
+
+function renderAmountCell(value: number) {
+  return value > 0 ? <strong className="amount-cell">{formatCurrency(value)}</strong> : '—'
 }
 
 function groupColumns(
@@ -855,25 +863,6 @@ const drilldownColumns = [
     ),
   },
   {
-    title: 'Value date',
-    dataIndex: 'valueDate',
-    key: 'valueDate',
-    width: 130,
-    render: (value: string) => formatDay(value),
-  },
-  {
-    title: 'Account',
-    dataIndex: 'accountType',
-    key: 'accountType',
-    width: 110,
-  },
-  {
-    title: 'Category',
-    dataIndex: 'category',
-    key: 'category',
-    width: 130,
-  },
-  {
     title: 'Direction',
     dataIndex: 'direction',
     key: 'direction',
@@ -925,14 +914,16 @@ const drilldownColumns = [
     dataIndex: 'debit',
     key: 'debit',
     width: 140,
-    render: (value: number) => (value > 0 ? formatCurrency(value) : '—'),
+    sorter: (left: StatementTransaction, right: StatementTransaction) => left.debit - right.debit,
+    render: (value: number) => renderAmountCell(value),
   },
   {
     title: 'Credit',
     dataIndex: 'credit',
     key: 'credit',
     width: 140,
-    render: (value: number) => (value > 0 ? formatCurrency(value) : '—'),
+    sorter: (left: StatementTransaction, right: StatementTransaction) => left.credit - right.credit,
+    render: (value: number) => renderAmountCell(value),
   },
   {
     title: 'Balance after',
