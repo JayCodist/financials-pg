@@ -74,6 +74,35 @@
   gap: 22px;
 }
 
+.exclusion-card {
+  border: 1px solid rgba(20, 83, 45, 0.12);
+  background: rgba(245, 250, 246, 0.72);
+}
+
+.exclusion-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.exclusion-label {
+  display: grid;
+  gap: 2px;
+}
+
+.exclusion-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.exclusion-input {
+  width: 220px;
+}
+
 .dashboard-header {
   display: flex;
   justify-content: space-between;

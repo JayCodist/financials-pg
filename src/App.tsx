@@ -1,4 +1,4 @@
-import { startTransition, useDeferredValue, useState, type Key, type ReactNode } from 'react'
+import { startTransition, useDeferredValue, useEffect, useState, type Key, type ReactNode } from 'react'
 import {
   Alert,
   Button,
@@ -28,6 +28,9 @@ import {
   buildInboundAccountRows,
   buildRecipientRows,
   buildRecurringRows,
+  compileExclusionKeywords,
+  countExcludedTransactions,
+  DEFAULT_EXCLUSION_KEYWORDS,
   filterTransactions,
   formatCurrency,
   formatDay,
@@ -46,6 +49,23 @@ const { RangePicker } = DatePicker
 const { Paragraph, Text, Title } = Typography
 
 type RangeValue = [Dayjs | null, Dayjs | null] | null
+
+const EXCLUSION_STORAGE_KEY = 'financials-pg.exclusion-keywords'
+
+function loadStoredExclusions(): string[] {
+  try {
+    const stored = localStorage.getItem(EXCLUSION_STORAGE_KEY)
+    const parsed: unknown = stored ? JSON.parse(stored) : null
+
+    if (Array.isArray(parsed) && parsed.every((item) => typeof item === 'string')) {
+      return parsed as string[]
+    }
+  } catch {
+    // Fall through to the defaults when storage is unavailable or corrupt.
+  }
+
+  return DEFAULT_EXCLUSION_KEYWORDS
+}
 
 type DrilldownState = {
   title: string
@@ -77,11 +97,19 @@ function App() {
   const [isParsing, setIsParsing] = useState(false)
   const [parseError, setParseError] = useState<string | null>(null)
   const [drilldown, setDrilldown] = useState<DrilldownState | null>(null)
+  const [exclusionKeywords, setExclusionKeywords] = useState<string[]>(loadStoredExclusions)
+  const [exclusionInput, setExclusionInput] = useState('')
 
   const deferredRange = useDeferredValue(dateRange)
 
+  useEffect(() => {
+    localStorage.setItem(EXCLUSION_STORAGE_KEY, JSON.stringify(exclusionKeywords))
+  }, [exclusionKeywords])
+
+  const exclusionRules = compileExclusionKeywords(exclusionKeywords)
+
   const filteredTransactions = dataset
-    ? filterTransactions(dataset.transactions, deferredRange, flowFilter)
+    ? filterTransactions(dataset.transactions, deferredRange, flowFilter, exclusionRules)
     : []
   const summary = summarizeTransactions(filteredTransactions)
   const recipientRows = buildRecipientRows(filteredTransactions)
@@ -106,6 +134,7 @@ function App() {
   const coveragePct = dataset
     ? Math.round((filteredTransactions.length / dataset.transactions.length) * 100)
     : 0
+  const excludedCount = dataset ? countExcludedTransactions(dataset.transactions, exclusionRules) : 0
 
   const defaultRange = dataset
     ? ([dayjs(dataset.summary.startDate), dayjs(dataset.summary.endDate)] as [Dayjs, Dayjs])
@@ -149,6 +178,43 @@ function App() {
     setFlowFilter('all')
     setSelectedFile(null)
     setParseError(null)
+    setDrilldown(null)
+  }
+
+  const addExclusionKeyword = () => {
+    const keyword = exclusionInput.trim()
+
+    if (!keyword) {
+      return
+    }
+
+    setExclusionKeywords((current) =>
+      current.some((existing) => existing.toLowerCase() === keyword.toLowerCase())
+        ? current
+        : [...current, keyword],
+    )
+    setExclusionInput('')
+  }
+
+  const removeExclusionKeyword = (keyword: string) => {
+    setExclusionKeywords((current) => current.filter((existing) => existing !== keyword))
+  }
+
+  const omitDrilldownGroup = () => {
+    if (!drilldown) {
+      return
+    }
+
+    const keyword = drilldown.title.trim()
+
+    if (keyword) {
+      setExclusionKeywords((current) =>
+        current.some((existing) => existing.toLowerCase() === keyword.toLowerCase())
+          ? current
+          : [...current, keyword],
+      )
+    }
+
     setDrilldown(null)
   }
 
@@ -277,6 +343,48 @@ function App() {
                 </div>
               </div>
             </header>
+
+            <Card bordered={false} className="exclusion-card">
+              <div className="exclusion-bar">
+                <div className="exclusion-label">
+                  <Text strong>Excluded from analysis</Text>
+                  <Text type="secondary">
+                    {excludedCount
+                      ? `${excludedCount} row${excludedCount === 1 ? '' : 's'} hidden by keyword. Internal wallet moves such as OWealth are not real spending.`
+                      : 'Add a keyword to drop rows like internal wallet moves from every view.'}
+                  </Text>
+                </div>
+                <div className="exclusion-controls">
+                  <Space wrap size="small">
+                    {exclusionKeywords.map((keyword) => (
+                      <Tag
+                        key={keyword}
+                        closable
+                        onClose={(event) => {
+                          event.preventDefault()
+                          removeExclusionKeyword(keyword)
+                        }}
+                        color="geekblue"
+                      >
+                        {keyword}
+                      </Tag>
+                    ))}
+                  </Space>
+                  <Input
+                    size="small"
+                    className="exclusion-input"
+                    placeholder="Keyword, for example owealth"
+                    value={exclusionInput}
+                    onChange={(event) => setExclusionInput(event.target.value)}
+                    onPressEnter={addExclusionKeyword}
+                    allowClear
+                  />
+                  <Button size="small" onClick={addExclusionKeyword} disabled={!exclusionInput.trim()}>
+                    Exclude
+                  </Button>
+                </div>
+              </div>
+            </Card>
 
             {filteredTransactions.length === 0 ? (
               <Card bordered={false} className="empty-card">
@@ -434,6 +542,9 @@ function App() {
                   <Tag color="green">
                     Inbound {formatCurrency(sumAmounts(drilldown.rows, 'inbound'))}
                   </Tag>
+                  <Button size="small" danger onClick={omitDrilldownGroup}>
+                    Omit this group
+                  </Button>
                 </Space>
               </div>
 

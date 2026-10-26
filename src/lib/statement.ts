@@ -91,6 +91,51 @@ const DATE_TIME_FORMATS = [
 ]
 const FEE_CATEGORIES = new Set(['Bank fee', 'Subscription'])
 
+// Movement between the OPay wallet and its own OWealth savings pocket is not
+// real spending or income. Users can add more keyword exclusions in the UI.
+export const DEFAULT_EXCLUSION_KEYWORDS = ['owealth']
+
+export type ExclusionRule = {
+  keyword: string
+  regex: RegExp
+}
+
+export function compileExclusionKeywords(keywords: string[]): ExclusionRule[] {
+  return keywords
+    .map((keyword) => keyword.trim())
+    .filter(Boolean)
+    .map((keyword) => ({
+      keyword,
+      regex: new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'),
+    }))
+}
+
+function matchesExclusionRule(transaction: StatementTransaction, rule: ExclusionRule): boolean {
+  const haystack = [
+    transaction.description,
+    transaction.recipientName,
+    transaction.counterpartyBank,
+    transaction.note,
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+  return rule.regex.test(haystack)
+}
+
+export function countExcludedTransactions(
+  transactions: StatementTransaction[],
+  rules: ExclusionRule[],
+): number {
+  if (rules.length === 0) {
+    return 0
+  }
+
+  return transactions.filter((transaction) =>
+    rules.some((rule) => matchesExclusionRule(transaction, rule)),
+  ).length
+}
+
 type RangeValue = [Dayjs | null, Dayjs | null] | null
 
 type ParsedDescription = {
@@ -137,8 +182,13 @@ export function filterTransactions(
   transactions: StatementTransaction[],
   range: RangeValue,
   flowFilter: FlowFilter,
+  excludeRules: ExclusionRule[] = [],
 ): StatementTransaction[] {
   return transactions.filter((transaction) => {
+    if (excludeRules.some((rule) => matchesExclusionRule(transaction, rule))) {
+      return false
+    }
+
     if (flowFilter !== 'all' && transaction.direction !== flowFilter) {
       return false
     }
